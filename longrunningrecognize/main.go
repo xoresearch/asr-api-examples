@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	TestVoiceFile			= "./short_voice.flac"
-	UploadingEndpoint		= "http://192.168.80.102:50120/v1/speech:longrunningrecognize"
-	FetchingStateEndpoint	= "http://192.168.80.102:50120/v1/operations/"
+	ExampleVoice			= "./short_voice.flac"
+	UploadingEndpoint		= "https://asr.sapiensapi.com/v1/speech:longrunningrecognize"
+	FetchingResultsEndpoint	= "https://asr.sapiensapi.com/v1/operations/"
 )
 
 //-------------------------------------------------------------------------------------------------
@@ -28,7 +28,7 @@ func main() {
 	runtime.GOMAXPROCS(numCpu)
 
 	// Load the voice data
-	voiceData, err := ioutil.ReadFile(TestVoiceFile)
+	voiceData, err := ioutil.ReadFile(ExampleVoice)
 
 	if err != nil {
 		fmt.Printf("Failed to load the voice data: %s.\n", err.Error())
@@ -60,19 +60,22 @@ func main() {
 
 		uploadingLoop(uploadingRequestBody, uploadingIterations, uploadingConcurrency, &operationsMap)
 
-		// Check the uploading results
+		// Run fetching loop if something is uploaded
 		operationsCount := countOperations(&operationsMap)
 
 		if operationsCount == 0 {
-			// No one uploading iteration has been successfully completed
-			println("No one uploading iteration has been successfully completed.")
+			// No one voice has been successfully uploaded
+			println("No one voice has been successfully uploaded.")
 
 		} else {
+			// Report the number of successfully uploaded voices
+			fmt.Printf("Uploaded %d voices. Fetching results...\n", operationsCount)
+
 			// Wait for a while expecting one second per one operation
 			time.Sleep(time.Second * time.Duration(operationsCount))
 
-			// Execute fetching for the operations results
-			fetchingStateLoop(&operationsMap)
+			// Fetch the operations results
+			fetchingResultsLoop(&operationsMap, operationsCount)
 		}
 
 		// Ask user if this is enough
@@ -106,12 +109,12 @@ func uploadingLoop(uploadingRequestBody []byte, uploadingIterations int32, uploa
 			response, err := http.Post(UploadingEndpoint, "application/json;charset=utf-8", bytes.NewReader(uploadingRequestBody))
 
 			if err != nil {
-				fmt.Printf(fmt.Sprintf("Failed to upload the audio data: %s\n", err.Error()))
+				fmt.Printf(fmt.Sprintf("Failed to upload the voice data: %s\n", err.Error()))
 				return
 			}
 
 			if response.StatusCode != http.StatusOK {
-				fmt.Printf(fmt.Sprintf("Failed to upload the audio data: %s\n", deserializeErrorResponse(response.Body)))
+				fmt.Printf(fmt.Sprintf("Failed to upload the voice data: %s\n", deserializeErrorResponse(response.Body)))
 				return
 			}
 
@@ -124,7 +127,7 @@ func uploadingLoop(uploadingRequestBody []byte, uploadingIterations int32, uploa
 			}
 
 			// Save the operation id to check its state later on
-			operationsMap.Store(iterationIndex, operationId)
+			operationsMap.Store(operationId, true)
 		}()
 	}
 
@@ -136,7 +139,7 @@ func uploadingLoop(uploadingRequestBody []byte, uploadingIterations int32, uploa
 func countOperations(operationsMap *sync.Map) uint32 {
 	var operationsCount uint32
 
-	operationsMap.Range(func(iterationIndex, operationId interface{}) bool {
+	operationsMap.Range(func(operationId, operationValue interface{}) bool {
 		operationsCount++
 		return true
 	})
@@ -145,11 +148,12 @@ func countOperations(operationsMap *sync.Map) uint32 {
 }
 
 //-------------------------------------------------------------------------------------------------
-func fetchingStateLoop(operationsMap *sync.Map) {
+func fetchingResultsLoop(operationsMap *sync.Map, operationsCount uint32) {
 	for {
-		operationsMap.Range(func(iterationIndex, operationId interface{}) bool {
+		// Iterate over all the operations and fetch results for each of them
+		operationsMap.Range(func(operationId, operationValue interface{}) bool {
 			// Execute fetching call
-			response, err := http.Get(FetchingStateEndpoint + strconv.FormatUint(operationId.(uint64), 10))
+			response, err := http.Get(FetchingResultsEndpoint + strconv.FormatUint(operationId.(uint64), 10))
 
 			if err != nil {
 				fmt.Printf(fmt.Sprintf("Failed to fetch an operation state: %s\n", err.Error()))
@@ -161,11 +165,44 @@ func fetchingStateLoop(operationsMap *sync.Map) {
 				return true
 			}
 
-			//
+			// Deserialize fetching response
 			transcriptions, completed, err := deserializeFetchingResponse(response.Body)
+
+			if err != nil {
+				fmt.Printf(fmt.Sprintf("Failed to deserialize fetching response: %s\n", err.Error()))
+				operationsMap.Delete(operationId)
+				operationsCount--
+				return true
+			}
+
+			if completed {
+				fmt.Printf("Voice ID: %d\n", operationId.(uint64))
+
+				for _, transcription := range transcriptions {
+					var text string
+
+					if len(transcription.Alternatives) != 0 {
+						text = transcription.Alternatives[0].Transcript
+					}
+
+					fmt.Printf("\t%f-%f\t%s\n", transcription.TimeStart, transcription.TimeEnd, text)
+				}
+
+				operationsMap.Delete(operationId)
+				operationsCount--
+				return true
+			}
 
 			return true
 		})
+
+		// Stop fetching if all the operations have been completed
+		if operationsCount == 0 {
+			break
+		}
+
+		// Wait for a while before next fetching stage
+		time.Sleep(time.Second)
 	}
 }
 

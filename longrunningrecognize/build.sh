@@ -21,7 +21,7 @@ export GOARCH=amd64
 #-------------------------------------------------------------------------------------------------
 echo -e "${GREEN}${BOLD}Compiling sources...${NC}${NA}"
 
-/usr/local/go/bin/go build -buildmode=exe -ldflags="-v -s" -o ${DIST_DIR}/asrapitest ${PROJECT_DIR}/main.go
+/usr/local/go/bin/go build -buildmode=exe -ldflags="-v -s" -o ${DIST_DIR}/longrunningrecognize ${PROJECT_DIR}/*.go
 
 if [ $? -ne 0 ]
 then
