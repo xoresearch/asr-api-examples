@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 PROJECT_DIR=${PWD}
-DIST_DIR="${PROJECT_DIR}/../-dist"
+DIST_DIR="${PROJECT_DIR}/bin"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -21,7 +21,7 @@ export GOARCH=amd64
 #-------------------------------------------------------------------------------------------------
 echo -e "${GREEN}${BOLD}Compiling sources...${NC}${NA}"
 
-/usr/local/go/bin/go build -buildmode=exe -ldflags="-v -s" -o ${DIST_DIR}/asrapitest ${PROJECT_DIR}/src/Main.go
+/usr/local/go/bin/go build -buildmode=exe -ldflags="-v -s" -o ${DIST_DIR}/asrapitest ${PROJECT_DIR}/main.go
 
 if [ $? -ne 0 ]
 then
@@ -36,7 +36,7 @@ echo -e "${GREEN}${BOLD}Completed.${NC}${NA}"
 #-------------------------------------------------------------------------------------------------
 echo -e "${GREEN}${BOLD}Copying dependencies...${NC}${NA}"
 
-cp -afv --recursive --copy-contents --target-directory=${DIST_DIR} ${PROJECT_DIR}/audio/*
+cp -afv --recursive --copy-contents --target-directory=${DIST_DIR} ${PROJECT_DIR}/../voices/*
 
 if [ $? -ne 0 ]
 then

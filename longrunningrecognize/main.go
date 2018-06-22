@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,9 +16,9 @@ import (
 )
 
 const (
-	TestAudioFile			= "./SampleVoices-KimBorge.flac"
-	UploadingEndpoint		= "http://192.168.80.102:50120/longrunningrecognize"
-	PollingEndpoint			= "http://192.168.80.102:50120/operations/"
+	TestVoiceFile			= "./short_voice.flac"
+	UploadingEndpoint		= "http://192.168.80.102:50120/v1/speech:longrunningrecognize"
+	FetchingStateEndpoint	= "http://192.168.80.102:50120/v1/operations/"
 )
 
 //-------------------------------------------------------------------------------------------------
@@ -26,24 +27,20 @@ func main() {
 	numCpu := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCpu)
 
-	// Load the audio data
-	audioData, err := ioutil.ReadFile(TestAudioFile)
+	// Load the voice data
+	voiceData, err := ioutil.ReadFile(TestVoiceFile)
 
 	if err != nil {
-		fmt.Printf("Failed to load the audio data: %s.\n", err.Error())
+		fmt.Printf("Failed to load the voice data: %s.\n", err.Error())
 		return
 	}
 
 	// Compose uploading request
-	var uploadingRequest struct {
-		Signal					[]byte					`json:"signal"`
-		LanguageCode			string					`json:"language_code"`
-		ExecuteBeamSearch		bool					`json:"execute_beam_search"`
+	uploadingRequest := LongRunningRecognizeRequest{
+		Signal:				voiceData,
+		LanguageCode:		"en-US",
+		ExecuteBeamSearch:	false,
 	}
-
-	uploadingRequest.Signal = audioData
-	uploadingRequest.LanguageCode = "en-US"
-	uploadingRequest.ExecuteBeamSearch = false
 
 	// Serialize uploading request
 	uploadingRequestBody, err := json.Marshal(&uploadingRequest)
@@ -64,18 +61,18 @@ func main() {
 		uploadingLoop(uploadingRequestBody, uploadingIterations, uploadingConcurrency, &operationsMap)
 
 		// Check the uploading results
-		operationsIds := extractOperationsIds(&operationsMap)
+		operationsCount := countOperations(&operationsMap)
 
-		if len(operationsIds) == 0 {
+		if operationsCount == 0 {
 			// No one uploading iteration has been successfully completed
 			println("No one uploading iteration has been successfully completed.")
 
 		} else {
 			// Wait for a while expecting one second per one operation
-			time.Sleep(time.Second * time.Duration(len(operationsIds)))
+			time.Sleep(time.Second * time.Duration(operationsCount))
 
-			// Execute polling for the operations results
-			pollingLoop(operationsIds)
+			// Execute fetching for the operations results
+			fetchingStateLoop(&operationsMap)
 		}
 
 		// Ask user if this is enough
@@ -105,7 +102,7 @@ func uploadingLoop(uploadingRequestBody []byte, uploadingIterations int32, uploa
 			defer waitGroup.Done()
 			defer atomic.AddInt32(&concurrencyLevel, -1)
 
-			// Execute the uploading call
+			// Execute uploading call
 			response, err := http.Post(UploadingEndpoint, "application/json;charset=utf-8", bytes.NewReader(uploadingRequestBody))
 
 			if err != nil {
@@ -114,12 +111,12 @@ func uploadingLoop(uploadingRequestBody []byte, uploadingIterations int32, uploa
 			}
 
 			if response.StatusCode != http.StatusOK {
-				fmt.Printf(fmt.Sprintf("Failed to upload the audio data: %s\n", deserializeFaultyUploadingResponse(response.Body)))
+				fmt.Printf(fmt.Sprintf("Failed to upload the audio data: %s\n", deserializeErrorResponse(response.Body)))
 				return
 			}
 
 			// Deserialize uploading response
-			operationId, err := deserializeSuccessfulUploadingResponse(response.Body)
+			operationId, err := deserializeUploadingResponse(response.Body)
 
 			if err != nil {
 				fmt.Printf(fmt.Sprintf("Failed to deserialize uploading response: %s\n", err.Error()))
@@ -136,19 +133,40 @@ func uploadingLoop(uploadingRequestBody []byte, uploadingIterations int32, uploa
 }
 
 //-------------------------------------------------------------------------------------------------
-func extractOperationsIds(operationsMap *sync.Map) []uint32 {
-	operationsIds := make([]uint32, 0, 1)
+func countOperations(operationsMap *sync.Map) uint32 {
+	var operationsCount uint32
 
 	operationsMap.Range(func(iterationIndex, operationId interface{}) bool {
-		operationsIds = append(operationsIds, operationId.(uint32))
+		operationsCount++
 		return true
 	})
 
-	return operationsIds
+	return operationsCount
 }
 
 //-------------------------------------------------------------------------------------------------
-func pollingLoop(operationsIds []uint32) {
+func fetchingStateLoop(operationsMap *sync.Map) {
+	for {
+		operationsMap.Range(func(iterationIndex, operationId interface{}) bool {
+			// Execute fetching call
+			response, err := http.Get(FetchingStateEndpoint + strconv.FormatUint(operationId.(uint64), 10))
+
+			if err != nil {
+				fmt.Printf(fmt.Sprintf("Failed to fetch an operation state: %s\n", err.Error()))
+				return true
+			}
+
+			if response.StatusCode != http.StatusOK {
+				fmt.Printf(fmt.Sprintf("Failed to fetch an operation state: %s\n", deserializeErrorResponse(response.Body)))
+				return true
+			}
+
+			//
+			transcriptions, completed, err := deserializeFetchingResponse(response.Body)
+
+			return true
+		})
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -201,22 +219,37 @@ func readStoppingCondition() bool {
 }
 
 //-------------------------------------------------------------------------------------------------
-func deserializeSuccessfulUploadingResponse(responseBody io.ReadCloser) (uint32, error) {
-	var uploadingResponse struct {
-		OperationId				uint32					`json:"operation_id"`
-	}
+func deserializeUploadingResponse(responseBody io.ReadCloser) (uint64, error) {
+	var response LongRunningRecognizeResponse
 
-	err := json.NewDecoder(responseBody).Decode(&uploadingResponse)
+	err := json.NewDecoder(responseBody).Decode(&response)
 
 	if err != nil {
 		return 0, err
 	}
 
-	return uploadingResponse.OperationId, nil
+	return response.OperationId, nil
 }
 
 //-------------------------------------------------------------------------------------------------
-func deserializeFaultyUploadingResponse(responseBody io.ReadCloser) string {
+func deserializeFetchingResponse(responseBody io.ReadCloser) ([]*Transcription, bool, error) {
+	var response FetchOperationResponse
+
+	err := json.NewDecoder(responseBody).Decode(&response)
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	if response.ProcessingStatus != "PROCESSING_COMPLETED" {
+		return nil, false, nil
+	}
+
+	return response.Transcriptions, true, nil
+}
+
+//-------------------------------------------------------------------------------------------------
+func deserializeErrorResponse(responseBody io.ReadCloser) string {
 	readBuffer, _ := ioutil.ReadAll(responseBody)
 
 	return string(readBuffer)
