@@ -67,7 +67,7 @@ func main() {
 
 		if operationsCount == 0 {
 			// No one voice has been successfully uploaded
-			println("No one voice has been successfully uploaded.")
+			fmt.Print("No one voice has been successfully uploaded.\n")
 
 		} else {
 			// Report the number of successfully uploaded voices
@@ -213,25 +213,25 @@ func readUploadingParams() (int32, int32) {
 	var uploadingIterations, uploadingConcurrency int32
 
 	for {
-		println("Uploading iterations: ")
+		fmt.Print("Uploading iterations: \n")
 		fmt.Scan(&uploadingIterations)
 
 		if uploadingIterations > 0 && uploadingIterations <= 1000 {
 			break
 		}
 
-		println("Uploading iterations must be in range between 1 and 1000.")
+		fmt.Print("Uploading iterations must be in range between 1 and 1000.\n")
 	}
 
 	for {
-		println("Uploading concurrency: ")
+		fmt.Print("Uploading concurrency: \n")
 		fmt.Scan(&uploadingConcurrency)
 
 		if uploadingConcurrency > 0 && uploadingConcurrency <= 64 {
 			break
 		}
 
-		println("Uploading concurrency must be in range between 1 and 64.")
+		fmt.Print("Uploading concurrency must be in range between 1 and 64.\n")
 	}
 
 	return uploadingIterations, uploadingConcurrency
@@ -242,7 +242,7 @@ func readStoppingCondition() bool {
 	var stoppingCondition string
 
 	for {
-		println("Another test? (y/n): ")
+		fmt.Print("Another test? (y/n): \n")
 		fmt.Scan(&stoppingCondition)
 
 		stoppingCondition = strings.ToLower(stoppingCondition)
