@@ -22,8 +22,8 @@ type FetchOperationResponse struct {
 	LanguageCode			string					`json:"language_code"`
 	BeamSearch				bool					`json:"beam_search"`
 	ProcessingStatus		string					`json:"processing_status"`
-	ProcessingStartedTime	time.Time				`json:"processing_started_time"`
-	ProcessingFinishedTime	time.Time				`json:"processing_finished_time"`
+	ProcessingStartedAt		time.Time				`json:"processing_started_at"`
+	ProcessingFinishedAt	time.Time				`json:"processing_finished_at"`
 	Speakers				[]*Speaker				`json:"speakers"`
 	Transcriptions			[]*Transcription		`json:"transcriptions"`
 }
