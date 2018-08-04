@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"path"
 	"runtime"
 	"strconv"
 	"strings"
@@ -17,10 +16,8 @@ import (
 	"time"
 )
 
-const (
-	ExampleVoice			= "short_voice.flac"
-	UploadingEndpoint		= "https://asr.sapiensapi.com/v1/speech:longrunningrecognize"
-	FetchingResultsEndpoint	= "https://asr.sapiensapi.com/v1/operations/"
+var (
+	ApiEndpoint string
 )
 
 //-------------------------------------------------------------------------------------------------
@@ -29,17 +26,26 @@ func main() {
 	numCpu := runtime.NumCPU()
 	runtime.GOMAXPROCS(numCpu)
 
-	// Load the voice data
-	voiceData, err := ioutil.ReadFile(path.Join(path.Dir(os.Args[0]), ExampleVoice))
+	// Make sure all the command line arguments are specified
+	if len(os.Args) < 3 {
+		fmt.Print("Specified too few command line arguments.\n")
+		return
+	}
+
+	// Acquire arguments from the command line
+	ApiEndpoint = os.Args[1]
+
+	// Load the voice record
+	voiceRecord, err := ioutil.ReadFile(os.Args[2])
 
 	if err != nil {
-		fmt.Printf("Failed to load the voice data: %s.\n", err.Error())
+		fmt.Printf("Failed to load a voice record: %s.\n", err.Error())
 		return
 	}
 
 	// Compose uploading request
 	uploadingRequest := LongRunningRecognizeRequest{
-		Signal:				voiceData,
+		Signal:				voiceRecord,
 		LanguageCode:		"en-US",
 		ExecuteBeamSearch:	false,
 	}
@@ -108,7 +114,7 @@ func uploadingLoop(uploadingRequestBody []byte, uploadingIterations int32, uploa
 			defer atomic.AddInt32(&concurrencyLevel, -1)
 
 			// Execute uploading call
-			response, err := http.Post(UploadingEndpoint, "application/json;charset=utf-8", bytes.NewReader(uploadingRequestBody))
+			response, err := http.Post(ApiEndpoint + "/v1/speech:longrunningrecognize", "application/json;charset=utf-8", bytes.NewReader(uploadingRequestBody))
 
 			if err != nil {
 				fmt.Printf("Failed to upload the voice data: %s\n", err.Error())
@@ -155,7 +161,7 @@ func fetchingResultsLoop(operationsMap *sync.Map, operationsCount uint32) {
 		// Iterate over all the operations and fetch results for each of them
 		operationsMap.Range(func(operationId, operationValue interface{}) bool {
 			// Execute fetching call
-			response, err := http.Get(FetchingResultsEndpoint + strconv.FormatUint(operationId.(uint64), 10))
+			response, err := http.Get(ApiEndpoint + "/v1/operations/" + strconv.FormatUint(operationId.(uint64), 10))
 
 			if err != nil {
 				fmt.Printf("Failed to fetch an operation state: %s\n", err.Error())
@@ -178,6 +184,7 @@ func fetchingResultsLoop(operationsMap *sync.Map, operationsCount uint32) {
 			}
 
 			if completed {
+				// Print recognition results
 				fmt.Printf("Voice ID: %d\n", operationId.(uint64))
 
 				for _, transcription := range transcriptions {
@@ -190,6 +197,7 @@ func fetchingResultsLoop(operationsMap *sync.Map, operationsCount uint32) {
 					fmt.Printf("\t%f-%f\t%s\n", transcription.TimeStart, transcription.TimeEnd, text)
 				}
 
+				// Delete the operation from the map
 				operationsMap.Delete(operationId)
 				operationsCount--
 				return true
@@ -204,7 +212,7 @@ func fetchingResultsLoop(operationsMap *sync.Map, operationsCount uint32) {
 		}
 
 		// Wait for a while before next fetching stage
-		time.Sleep(time.Second)
+		time.Sleep(time.Second * 5)
 	}
 }
 
