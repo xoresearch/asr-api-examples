@@ -3,7 +3,7 @@
 PROJECT_DIR="$(dirname "${0}")"
 
 API_ENDPOINT="https://asr.sapiensapi.com"
-VOICE_RECORD="${PROJECT_DIR}/../voices/20min.flac"
+VOICE_RECORD="${PROJECT_DIR}/../voices/1min.flac"
 
 #-------------------------------------------------------------------------------------------------
 # Setup environment
