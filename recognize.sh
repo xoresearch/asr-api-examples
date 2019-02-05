@@ -19,4 +19,4 @@ echo -En "${request_body}" | curl \
 	--request POST \
 	--header "Content-Type: application/json; charset=utf-8" \
 	--data-binary @- \
-	"https://asr.sapiensapi.com/v1/speech:recognize"
+	"https://asr.sapiensapi.com/rest/recognize"
